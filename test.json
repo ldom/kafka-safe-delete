@@ -1,0 +1,8 @@
+{
+    "uid": 5,
+    "environment": "RND",
+    "topics_to_recreate": [
+        "aaa",
+        "bbb"
+    ]
+}
