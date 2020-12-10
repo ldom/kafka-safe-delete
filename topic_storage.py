@@ -1,37 +1,4 @@
-import time
-from typing import Tuple
-
-from confluent_kafka import Consumer, KafkaException, Producer, TopicPartition
-
-
-def get_latest_applied_2(client_options, topic_name, read_timeout=1.0):
-    client_options.update({
-        'auto.offset.reset': 'earliest',
-        'enable.auto.commit': False,
-    })
-    c = Consumer(client_options)
-
-    partition = TopicPartition(topic_name, 0, 0)
-    c.assign([partition])
-
-    c.subscribe([topic_name])
-    read = None
-
-    while True:
-        msg = c.poll(timeout=read_timeout)
-        if msg is None:
-            break
-
-        if msg and msg.error():
-            print("Consumer error: {}".format(msg.error()))
-            break
-
-        if msg:
-            read = msg.value().decode('utf-8')
-            print('Read: {}'.format(read))
-
-    c.close()
-    return read
+from confluent_kafka import Consumer, Producer, TopicPartition
 
 
 def get_latest_applied(client_options, topic_name, read_timeout=1.0):
@@ -57,7 +24,7 @@ def get_latest_applied(client_options, topic_name, read_timeout=1.0):
     msg = c.consume(num_messages=1, timeout=read_timeout)
     if msg:
         read = msg[0].value().decode('utf-8')
-        print('Read: {}'.format(read))
+        # print('Read: {}'.format(read))
 
     c.close()
     return read

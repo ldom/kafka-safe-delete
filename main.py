@@ -3,7 +3,7 @@ import argparse
 from confluent_kafka.admin import AdminClient
 
 from cli_utils import read_json_input
-from safe_delete import topic_safe_delete, topics_safe_delete
+from safe_delete import topics_safe_delete
 from topic_storage import get_latest_applied, set_latest_applied
 
 
@@ -11,6 +11,7 @@ UID_TOPIC_NAME = "uids"
 READ_TIMEOUT = 2.0
 
 """
+example input JSON
 {
     'uid': 17,
     'environment': 'RND',
@@ -63,6 +64,7 @@ def main():
     # if not the first time, we check that we haven't applied this one yet
     if latest_applied_uid:
         if int(input_data[JSON_INPUT_UID]) <= int(latest_applied_uid):
+            print("Already done!")
             return False  # we do nothing if it's been applied already
 
     # TODO test the env (how to get the current env?)
@@ -72,12 +74,13 @@ def main():
     a = AdminClient(admin_options)
     success, results = topics_safe_delete(a, input_data[JSON_INPUT_TOPICS])
 
+    print(results)
+
     if success:
         # write uid in topic
         set_latest_applied(producer_options, UID_TOPIC_NAME, str(input_data['uid']))
         return True
 
-    print(results)
     return False
 
 
