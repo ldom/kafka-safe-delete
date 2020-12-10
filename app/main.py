@@ -18,7 +18,7 @@ def hello():
     return "Hello World from Flask"
 
 
-@app.route("/topics/<topic>", methods=['DEL'])
+@app.route("/topics/<topic>", methods=['DELETE'])
 def delete_topic(topic):
     return topic_safe_delete(bootstrap_servers, topic)
 
