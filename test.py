@@ -59,15 +59,24 @@ class TestDelete(unittest.TestCase):
         self.assertEqual(a_value, "3")
 
     def test_recreate(self):
+        a = AdminClient({'bootstrap.servers': self.bootstrap_servers})
+
         topic_names = ["test_1", "test_2"]
-        topic1 = NewTopic(topic_names[0], num_partitions=3, replication_factor=1, config={
+
+        # make sure they don't exist
+        topics_safe_delete(admin_connection=a, topic_names=topic_names)
+
+        # then create them
+        topic1 = NewTopic(topic_names[0], num_partitions=6, replication_factor=1, config={
             "compression.type": "snappy",
             "max.message.bytes": "123456"
         })
         topic2 = NewTopic(topic_names[1], num_partitions=3, replication_factor=1)
 
-        a = AdminClient({'bootstrap.servers': self.bootstrap_servers})
         a.create_topics([topic1, topic2])
+        while not topic_exists(a, "test_2"):
+            time.sleep(0.2)
+
         ret, _ = topics_recreate(admin_connection=a, topic_names=topic_names)
         self.assertTrue(ret)
 
@@ -77,9 +86,17 @@ class TestDelete(unittest.TestCase):
         # get the topic1 config
         topic1_info = gather_topic_info(a, "test_1")
 
+        self.assertEqual(len(topic1_info.partitions), 6)
         self.assertEqual(topic1_info.full_config.get("max.message.bytes"), "123456")
         self.assertEqual(topic1_info.non_default_config.get("compression.type"), "snappy")
 
         # cleanup
         ret, _ = topics_safe_delete(admin_connection=a, topic_names=topic_names)
         self.assertTrue(ret)
+
+    def test_recreate_fail_if_not_exist(self):
+        a = AdminClient({'bootstrap.servers': self.bootstrap_servers})
+
+        topic_names = ["test_3"]
+        ret, _ = topics_recreate(admin_connection=a, topic_names=topic_names)
+        self.assertFalse(ret)

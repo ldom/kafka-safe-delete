@@ -138,20 +138,23 @@ def topic_safe_delete(admin_connection, topic_name, dry_run=False) -> Tuple[bool
 
     # print("checking auto.create.topics.enable...")
     if auto_create_topics_enabled(brokers_config):
-        return False, f"auto.create.topics.enable is set to True!, querying a " \
-                      f"deleted topic will re-create it (which is not acceptable).", \
+        return False, \
+               f"auto.create.topics.enable is set to True!, " \
+               f"querying a deleted topic will re-create it (which is not acceptable).", \
                topic_info
 
     # print("checking consumer groups...")
     nb_consumer_groups = consumer_groups_on_topic()
     if nb_consumer_groups:
-        return False, f"there are {nb_consumer_groups} consumer group(s) on topic {topic_name}.", \
+        return False, \
+               f"there are {nb_consumer_groups} consumer group(s) on topic {topic_name}.", \
                topic_info
 
     # print("checking all partitions are online...")
     all_online, partitions_not_online = all_partitions_online(topic_info.partitions)
     if not all_online:
-        return False, f"not all partitions are online for topic {topic_name}: {partitions_not_online} are offline.", \
+        return False, \
+               f"not all partitions are online for topic {topic_name}: {partitions_not_online} are offline.", \
                topic_info
 
     # print("checking that no reassignments are in progress...")
@@ -159,7 +162,8 @@ def topic_safe_delete(admin_connection, topic_name, dry_run=False) -> Tuple[bool
     # print("checking that `delete.topic.enable=true` for all brokers")
     all_enabled, brokers_not_enabled = all_brokers_have_delete_topic_enabled(brokers_config)
     if not all_enabled:
-        return False, f"broker(s) {brokers_not_enabled} do(es) not have `delete.topic.enable=true`.", \
+        return False, \
+               f"broker(s) {brokers_not_enabled} do(es) not have `delete.topic.enable=true`.", \
                topic_info
 
     if dry_run:
@@ -185,11 +189,15 @@ def topics_recreate(admin_connection, topic_names, dry_run=False) -> Tuple[bool,
 
         create_msg = ""
         if ret:
-            ret, create_msg = topic_create(admin_connection, topic_name,
-                                           num_partitions=len(topic_info.partitions),
-                                           replication_factor=topic_info.replication_factor,
-                                           topic_settings=topic_info.non_default_config
-                                           )
+            if not topic_info:
+                create_msg = "Cannot re-create a topic that doesn't exist."
+                ret = False
+            else:
+                ret, create_msg = topic_create(admin_connection, topic_name,
+                                               num_partitions=len(topic_info.partitions),
+                                               replication_factor=topic_info.replication_factor,
+                                               topic_settings=topic_info.non_default_config
+                                               )
 
         results[topic_name] = {'success': ret, 'message': ' '.join([delete_msg, create_msg])}
         if not ret:
