@@ -19,7 +19,7 @@ class TestDelete(unittest.TestCase):
         topic = NewTopic(topic_name, num_partitions=3, replication_factor=1)
         a = AdminClient({'bootstrap.servers': self.bootstrap_servers})
         a.create_topics([topic])
-        ret, _, _, _ = topic_safe_delete(admin_connection=a, topic_name=topic_name)
+        ret, _, _ = topic_safe_delete(admin_connection=a, topic_name=topic_name)
         self.assertTrue(ret)
 
     def test_multiple(self):
@@ -33,7 +33,7 @@ class TestDelete(unittest.TestCase):
 
     def test_non_existing(self):
         a = AdminClient({'bootstrap.servers': self.bootstrap_servers})
-        ret, _, _, _ = topic_safe_delete(admin_connection=a, topic_name="does_not_exist")
+        ret, _, _ = topic_safe_delete(admin_connection=a, topic_name="does_not_exist")
         self.assertTrue(ret)
 
     def test_latest_applied(self):
@@ -75,10 +75,10 @@ class TestDelete(unittest.TestCase):
             time.sleep(0.2)
 
         # get the topic1 config
-        topic1_config, topic1_non_default_config, _ = gather_topic_info(a, "test_1")
+        topic1_info = gather_topic_info(a, "test_1")
 
-        self.assertEqual(topic1_config.get("max.message.bytes"), "123456")
-        self.assertEqual(topic1_non_default_config.get("compression.type"), "snappy")
+        self.assertEqual(topic1_info.full_config.get("max.message.bytes"), "123456")
+        self.assertEqual(topic1_info.non_default_config.get("compression.type"), "snappy")
 
         # cleanup
         ret, _ = topics_safe_delete(admin_connection=a, topic_names=topic_names)

@@ -1,9 +1,16 @@
+from collections import namedtuple
 from distutils.util import strtobool
 import time
-from typing import Tuple
+from typing import Optional, Tuple
 
-from confluent_kafka.admin import AdminClient, ConfigResource, ConfigSource, NewTopic, RESOURCE_TOPIC, RESOURCE_BROKER
+from confluent_kafka.admin import ConfigResource, ConfigSource, NewTopic, RESOURCE_TOPIC, RESOURCE_BROKER
 from confluent_kafka import KafkaException
+
+
+TopicInfo = namedtuple('TopicInfo', ["full_config",
+                                     "non_default_config",
+                                     "replication_factor",
+                                     "partitions"])
 
 
 def print_config(config, depth):
@@ -19,7 +26,7 @@ def gather_cluster_info(admin_client):
     return admin_client.list_topics(timeout=10)
 
 
-def gather_topic_info(admin_client, topic_name):
+def gather_topic_info(admin_client, topic_name) -> Optional[TopicInfo]:  # returns None if the topic does not exist
     fs = admin_client.describe_configs([ConfigResource(RESOURCE_TOPIC, topic_name)])
 
     topic_config = {}
@@ -35,14 +42,19 @@ def gather_topic_info(admin_client, topic_name):
                 # print_config(config, 1)
 
         except KafkaException as e:
-            print("Failed to describe {}: {}".format(res, e))
+            # print("Failed to describe {}: {}".format(res, e))
+            return None
         except Exception:
             raise
 
     topic_data = admin_client.list_topics(topic_name)
     topic_partitions = topic_data.topics[topic_name].partitions
 
-    return topic_config, topic_non_default_config, topic_partitions
+    replication_factor = len(topic_partitions.get(0).replicas)
+
+    return TopicInfo(full_config=topic_config, non_default_config=topic_non_default_config,
+                     partitions=topic_partitions,
+                     replication_factor=replication_factor)
 
 
 def gather_broker_details(admin_client, broker_ids):
@@ -99,55 +111,48 @@ def consumer_groups_on_topic():
     return 0
 
 
-def get_topic_config(bootstrap_servers, topic_name):
-    print(f"🧐 gathering cluster and topic information...{bootstrap_servers}, {topic_name}")
-    a = AdminClient({'bootstrap.servers': bootstrap_servers})
-    topic_config, topic_non_default_config, topic_partitions = gather_topic_info(a, topic_name)
-    return topic_config, topic_non_default_config
-
-
 def topics_safe_delete(admin_connection, topic_names, dry_run=False) -> Tuple[bool, dict]:
     results = {}
     success = True
 
     for topic_name in topic_names:
-        ret, msg, config, non_def_config = topic_safe_delete(admin_connection, topic_name, dry_run)
-        results[topic_name] = {'success': ret, 'message': msg, 'topic_config': config}
+        ret, msg, topic_info = topic_safe_delete(admin_connection, topic_name, dry_run)
+        results[topic_name] = {'success': ret, 'message': msg, 'topic_info': topic_info}
         if not ret:
             success = False
 
     return success, results
 
 
-def topic_safe_delete(admin_connection, topic_name, dry_run=False) -> Tuple[bool, str, dict, dict]:
+def topic_safe_delete(admin_connection, topic_name, dry_run=False) -> Tuple[bool, str, Optional[TopicInfo]]:
     # print("🧐 gathering cluster and topic information...")
     cluster_info = gather_cluster_info(admin_connection)
 
-    topic_config, topic_non_default_config, topic_partitions = gather_topic_info(admin_connection, topic_name)
+    topic_info = gather_topic_info(admin_connection, topic_name)
     broker_ids = list(cluster_info.brokers.keys())
     brokers_config = gather_broker_details(admin_connection, broker_ids)
 
     # print("checking that the topic exists...")
     if not topic_exists(admin_connection, topic_name):
-        return True, f"Topic {topic_name} does not exist", {}, {}
+        return True, f"Topic {topic_name} does not exist", None
 
     # print("checking auto.create.topics.enable...")
     if auto_create_topics_enabled(brokers_config):
         return False, f"auto.create.topics.enable is set to True!, querying a " \
                       f"deleted topic will re-create it (which is not acceptable).", \
-               topic_config, topic_non_default_config
+               topic_info
 
     # print("checking consumer groups...")
     nb_consumer_groups = consumer_groups_on_topic()
     if nb_consumer_groups:
         return False, f"there are {nb_consumer_groups} consumer group(s) on topic {topic_name}.", \
-               topic_config, topic_non_default_config
+               topic_info
 
     # print("checking all partitions are online...")
-    all_online, partitions_not_online = all_partitions_online(topic_partitions)
+    all_online, partitions_not_online = all_partitions_online(topic_info.partitions)
     if not all_online:
         return False, f"not all partitions are online for topic {topic_name}: {partitions_not_online} are offline.", \
-               topic_config, topic_non_default_config
+               topic_info
 
     # print("checking that no reassignments are in progress...")
 
@@ -155,10 +160,10 @@ def topic_safe_delete(admin_connection, topic_name, dry_run=False) -> Tuple[bool
     all_enabled, brokers_not_enabled = all_brokers_have_delete_topic_enabled(brokers_config)
     if not all_enabled:
         return False, f"broker(s) {brokers_not_enabled} do(es) not have `delete.topic.enable=true`.", \
-               topic_config, topic_non_default_config
+               topic_info
 
     if dry_run:
-        return True, "👋 dry run...", topic_config, topic_non_default_config
+        return True, "👋 dry run...", topic_info
 
     # print("💥 deleting topic...")
     admin_connection.delete_topics([topic_name])
@@ -168,7 +173,7 @@ def topic_safe_delete(admin_connection, topic_name, dry_run=False) -> Tuple[bool
     while topic_exists(admin_connection, topic_name):
         time.sleep(0.2)
 
-    return True, f"Topic {topic_name} has been deleted.", topic_config, topic_non_default_config
+    return True, f"Topic {topic_name} has been deleted.", topic_info
 
 
 def topics_recreate(admin_connection, topic_names, dry_run=False) -> Tuple[bool, dict]:
@@ -176,11 +181,15 @@ def topics_recreate(admin_connection, topic_names, dry_run=False) -> Tuple[bool,
     success = True
 
     for topic_name in topic_names:
-        ret, delete_msg, topic_config, topic_non_default_config = topic_safe_delete(admin_connection, topic_name, dry_run)
+        ret, delete_msg, topic_info = topic_safe_delete(admin_connection, topic_name, dry_run)
 
         create_msg = ""
         if ret:
-            ret, create_msg = topic_create(admin_connection, topic_name, topic_non_default_config)
+            ret, create_msg = topic_create(admin_connection, topic_name,
+                                           num_partitions=len(topic_info.partitions),
+                                           replication_factor=topic_info.replication_factor,
+                                           topic_settings=topic_info.non_default_config
+                                           )
 
         results[topic_name] = {'success': ret, 'message': ' '.join([delete_msg, create_msg])}
         if not ret:
@@ -189,7 +198,10 @@ def topics_recreate(admin_connection, topic_names, dry_run=False) -> Tuple[bool,
     return success, results
 
 
-def topic_create(admin_connection, topic_name, topic_settings):
-    topic = NewTopic(topic_name, num_partitions=1, replication_factor=1, config=topic_settings)
+def topic_create(admin_connection, topic_name, num_partitions, replication_factor, topic_settings):
+    topic = NewTopic(topic_name,
+                     num_partitions=num_partitions,
+                     replication_factor=replication_factor,
+                     config=topic_settings)
     admin_connection.create_topics([topic])
     return True, f"Topic {topic_name} created with options: {topic_settings}."
