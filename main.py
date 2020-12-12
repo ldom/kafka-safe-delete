@@ -3,7 +3,7 @@ import argparse
 from confluent_kafka.admin import AdminClient
 
 from cli_utils import read_json_input
-from safe_delete import topics_safe_delete
+from safe_delete import topics_safe_delete, topics_recreate
 from topic_storage import get_latest_applied, set_latest_applied
 
 
@@ -24,7 +24,7 @@ example input JSON
 
 JSON_INPUT_UID = "uid"
 JSON_INPUT_ENV = "environment"
-JSON_INPUT_TOPICS = "topics_to_recreate"
+JSON_INPUT_RECREATE_TOPICS = "topics_to_recreate"
 
 
 def handle_arguments():
@@ -72,16 +72,17 @@ def main():
 
     # apply the actions
     a = AdminClient(admin_options)
-    success, results = topics_safe_delete(a, input_data[JSON_INPUT_TOPICS])
+    success, results = topics_recreate(a, input_data[JSON_INPUT_RECREATE_TOPICS])
 
     print(results)
 
-    if success:
-        # write uid in topic
-        set_latest_applied(producer_options, UID_TOPIC_NAME, str(input_data['uid']))
-        return True
+    # write uid in topic
+    set_latest_applied(producer_options, UID_TOPIC_NAME, str(input_data['uid']))
 
-    return False
+    if success:
+        return True
+    else:
+        return False
 
 
 if __name__ == "__main__":

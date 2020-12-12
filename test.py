@@ -3,7 +3,7 @@ import unittest
 
 from confluent_kafka.admin import AdminClient, NewTopic
 
-from safe_delete import topic_safe_delete, topics_safe_delete
+from safe_delete import gather_topic_info, topic_exists, topics_recreate, topic_safe_delete, topics_safe_delete
 from topic_storage import get_latest_applied, set_latest_applied
 
 
@@ -19,7 +19,7 @@ class TestDelete(unittest.TestCase):
         topic = NewTopic(topic_name, num_partitions=3, replication_factor=1)
         a = AdminClient({'bootstrap.servers': self.bootstrap_servers})
         a.create_topics([topic])
-        ret, _ = topic_safe_delete(admin_connection=a, topic_name=topic_name)
+        ret, _, _, _ = topic_safe_delete(admin_connection=a, topic_name=topic_name)
         self.assertTrue(ret)
 
     def test_multiple(self):
@@ -33,7 +33,7 @@ class TestDelete(unittest.TestCase):
 
     def test_non_existing(self):
         a = AdminClient({'bootstrap.servers': self.bootstrap_servers})
-        ret, _ = topic_safe_delete(admin_connection=a, topic_name="does_not_exist")
+        ret, _, _, _ = topic_safe_delete(admin_connection=a, topic_name="does_not_exist")
         self.assertTrue(ret)
 
     def test_latest_applied(self):
@@ -58,5 +58,28 @@ class TestDelete(unittest.TestCase):
         a_value = get_latest_applied(consumer_options, topic_name)
         self.assertEqual(a_value, "3")
 
-    def test_read_json(self):
-        pass
+    def test_recreate(self):
+        topic_names = ["test_1", "test_2"]
+        topic1 = NewTopic(topic_names[0], num_partitions=3, replication_factor=1, config={
+            "compression.type": "snappy",
+            "max.message.bytes": "123456"
+        })
+        topic2 = NewTopic(topic_names[1], num_partitions=3, replication_factor=1)
+
+        a = AdminClient({'bootstrap.servers': self.bootstrap_servers})
+        a.create_topics([topic1, topic2])
+        ret, _ = topics_recreate(admin_connection=a, topic_names=topic_names)
+        self.assertTrue(ret)
+
+        while not topic_exists(a, "test_1"):
+            time.sleep(0.2)
+
+        # get the topic1 config
+        topic1_config, topic1_non_default_config, _ = gather_topic_info(a, "test_1")
+
+        self.assertEqual(topic1_config.get("max.message.bytes"), "123456")
+        self.assertEqual(topic1_non_default_config.get("compression.type"), "snappy")
+
+        # cleanup
+        ret, _ = topics_safe_delete(admin_connection=a, topic_names=topic_names)
+        self.assertTrue(ret)
