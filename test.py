@@ -2,13 +2,14 @@ import time
 import unittest
 
 from confluent_kafka.admin import AdminClient, NewTopic
+from confluent_kafka import KafkaException, KafkaError
 
 from safe_delete import gather_topic_info, topic_exists, topics_recreate, topic_safe_delete, topics_safe_delete
 from topic_storage import get_latest_applied, set_latest_applied
 
 
 class TestDelete(unittest.TestCase):
-    bootstrap_servers = '192.168.0.129:9092'
+    bootstrap_servers = '127.0.0.1:9092'
     consumer_options = {
         'bootstrap.servers': bootstrap_servers,
         'group.id': 'test_safe_delete'
@@ -61,7 +62,7 @@ class TestDelete(unittest.TestCase):
     def test_recreate(self):
         a = AdminClient({'bootstrap.servers': self.bootstrap_servers})
 
-        topic_names = ["test_1", "test_2"]
+        topic_names = ["test_4", "test_5"]
 
         # make sure they don't exist
         topics_safe_delete(admin_connection=a, topic_names=topic_names)
@@ -73,18 +74,15 @@ class TestDelete(unittest.TestCase):
         })
         topic2 = NewTopic(topic_names[1], num_partitions=3, replication_factor=1)
 
+        print(f"create {topic_names}")
         a.create_topics([topic1, topic2])
-        while not topic_exists(a, "test_2"):
-            time.sleep(0.2)
+        time.sleep(2)
 
         ret, _ = topics_recreate(admin_connection=a, topic_names=topic_names)
         self.assertTrue(ret)
 
-        while not topic_exists(a, "test_1"):
-            time.sleep(0.2)
-
         # get the topic1 config
-        topic1_info = gather_topic_info(a, "test_1")
+        topic1_info = gather_topic_info(a, topic_names[0])
 
         self.assertEqual(len(topic1_info.partitions), 6)
         self.assertEqual(topic1_info.full_config.get("max.message.bytes"), "123456")

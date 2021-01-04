@@ -4,7 +4,7 @@ import time
 from typing import Optional, Tuple
 
 from confluent_kafka.admin import ConfigResource, ConfigSource, NewTopic, RESOURCE_TOPIC, RESOURCE_BROKER
-from confluent_kafka import KafkaException
+from confluent_kafka import KafkaException, KafkaError
 
 
 TopicInfo = namedtuple('TopicInfo', ["full_config",
@@ -103,8 +103,10 @@ def auto_create_topics_enabled(brokers_config):
 
 
 def topic_exists(admin_client, topic_name):
-    topic_info = admin_client.list_topics(topic_name)
-    return len(topic_info.topics[topic_name].partitions) > 0
+    all_topics = admin_client.list_topics()
+    topic_info = all_topics.topics.get(topic_name)
+    # print(f"topic_info.topics({topic_name}) = {topic_info}")
+    return topic_info is not None
 
 
 def consumer_groups_on_topic():
@@ -134,6 +136,7 @@ def topic_safe_delete(admin_connection, topic_name, dry_run=False) -> Tuple[bool
 
     # print("checking that the topic exists...")
     if not topic_exists(admin_connection, topic_name):
+        # print(f"Topic {topic_name} does not exist")
         return True, f"Topic {topic_name} does not exist", None
 
     # print("checking auto.create.topics.enable...")
@@ -177,6 +180,7 @@ def topic_safe_delete(admin_connection, topic_name, dry_run=False) -> Tuple[bool
     while topic_exists(admin_connection, topic_name):
         time.sleep(0.2)
 
+    # print(f"Topic {topic_name} has been deleted.")
     return True, f"Topic {topic_name} has been deleted.", topic_info
 
 
@@ -211,16 +215,16 @@ def topic_create(admin_connection, topic_name, num_partitions, replication_facto
                      num_partitions=num_partitions,
                      replication_factor=replication_factor,
                      config=topic_settings)
-    fs = admin_connection.create_topics([topic])
-
-    # Wait for operation to finish.
-    # Timeouts are preferably controlled by passing request_timeout=15.0
-    # to the create_topics() call.
-    for t, f in fs.items():
-        try:
-            f.result()  # The result itself is None
-            print(f"Topic {t} created with options: {topic_settings}.")
-            return True, f"Topic {t} created with options: {topic_settings}."
-        except Exception as e:
-            print(f"Error creating topic {t}: {e}.")
-            return False, f"Error creating topic {t}: {e}."
+    while True:
+        fs = admin_connection.create_topics([topic])
+        for t, f in fs.items():
+            try:
+                f.result()  # The result itself is None
+                # print(f"Topic {t} created with options: {topic_settings}.")
+                return True, f"Topic {t} created with options: {topic_settings}."
+            except KafkaException as e:
+                # print(f"Error creating topic {t}: {e}.")
+                if e.args[0].code() == KafkaError.TOPIC_ALREADY_EXISTS:
+                    time.sleep(0.2)
+                    continue
+                return False, f"Error creating topic {t}: {e}."
