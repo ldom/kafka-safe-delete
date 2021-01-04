@@ -211,5 +211,16 @@ def topic_create(admin_connection, topic_name, num_partitions, replication_facto
                      num_partitions=num_partitions,
                      replication_factor=replication_factor,
                      config=topic_settings)
-    admin_connection.create_topics([topic])
-    return True, f"Topic {topic_name} created with options: {topic_settings}."
+    fs = admin_connection.create_topics([topic])
+
+    # Wait for operation to finish.
+    # Timeouts are preferably controlled by passing request_timeout=15.0
+    # to the create_topics() call.
+    for t, f in fs.items():
+        try:
+            f.result()  # The result itself is None
+            print(f"Topic {t} created with options: {topic_settings}.")
+            return True, f"Topic {t} created with options: {topic_settings}."
+        except Exception as e:
+            print(f"Error creating topic {t}: {e}.")
+            return False, f"Error creating topic {t}: {e}."
