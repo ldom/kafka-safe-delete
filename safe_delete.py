@@ -200,7 +200,9 @@ def topics_recreate(admin_connection, topic_names, dry_run=False) -> Tuple[bool,
                 ret, create_msg = topic_create(admin_connection, topic_name,
                                                num_partitions=len(topic_info.partitions),
                                                replication_factor=topic_info.replication_factor,
-                                               topic_settings=topic_info.non_default_config
+                                               topic_settings=topic_info.non_default_config,
+                                               already_exists_retries=20,
+                                               retry_wait=0.5,
                                                )
 
         results[topic_name] = {'success': ret, 'message': ' '.join([delete_msg, create_msg])}
@@ -210,11 +212,13 @@ def topics_recreate(admin_connection, topic_names, dry_run=False) -> Tuple[bool,
     return success, results
 
 
-def topic_create(admin_connection, topic_name, num_partitions, replication_factor, topic_settings):
+def topic_create(admin_connection, topic_name, num_partitions, replication_factor, topic_settings,
+                 already_exists_retries=10, retry_wait=0.2):
     topic = NewTopic(topic_name,
                      num_partitions=num_partitions,
                      replication_factor=replication_factor,
                      config=topic_settings)
+    nb_retries = 0
     while True:
         fs = admin_connection.create_topics([topic])
         for t, f in fs.items():
@@ -225,6 +229,12 @@ def topic_create(admin_connection, topic_name, num_partitions, replication_facto
             except KafkaException as e:
                 # print(f"Error creating topic {t}: {e}.")
                 if e.args[0].code() == KafkaError.TOPIC_ALREADY_EXISTS:
-                    time.sleep(0.2)
+                    time.sleep(retry_wait)
+                    # print(f"wait {retry_wait} s")
+                    if nb_retries >= already_exists_retries:
+                        # print(f"nb_retries = {nb_retries}, already_exists_retries = {already_exists_retries}")
+                        return False, f"Error creating topic {t}: {e} ({nb_retries} tries)."
+                    nb_retries += 1
                     continue
+                # print(f"Error creating topic {t}: {e}.")
                 return False, f"Error creating topic {t}: {e}."
