@@ -36,6 +36,9 @@ def handle_arguments():
                         help="JSON input file to read (default = './topics.json'). ",
                         default="./topics.json")
 
+    parser.add_argument("-c", "--config", help="Config properties for connecting to the cluster, in JSON format. "
+                                               "Minimum = '{ \"bootstrap.servers\": \"<ip-or-dns-name>:9092\" }'")
+
     return parser.parse_args()
 
 
@@ -44,15 +47,17 @@ def main():
     args = handle_arguments()
 
     ####################################################################################################
-    # TODO update options
+    # client options
     ####################################################################################################
-    bootstrap_servers = '192.168.0.129:9092'
+    bootstrap_servers = '192.168.0.129:9092'  # put default server here
     admin_options = {'bootstrap.servers': bootstrap_servers}
-    consumer_options = {
-        'bootstrap.servers': bootstrap_servers,
-        'group.id': 'test_safe_delete'
-    }
-    producer_options = {'bootstrap.servers': bootstrap_servers}
+    if args.config:
+        admin_options = read_json_input(args.config)
+
+    consumer_options = admin_options.copy()
+    consumer_options.update({'group.id': 'safe_delete'})
+
+    producer_options = admin_options
     ####################################################################################################
 
     # read JSON input data
